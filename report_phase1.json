@@ -1,0 +1,28 @@
+{
+  "model": "Qwen/Qwen3-1.7B",
+  "prompt": "Explain in one paragraph why floating point addition is not associative, and why that matters for reproducibility.",
+  "max_tokens": 256,
+  "n_repeats": 100,
+  "timestamp": "2026-07-21T12:45:33",
+  "results": [
+    {
+      "batch_size": 1,
+      "all_identical": true,
+      "n_diverging": 0,
+      "divergence_indices": []
+    },
+    {
+      "batch_size": 32,
+      "all_identical": false,
+      "n_diverging": 6,
+      "divergence_indices": [
+        235,
+        235,
+        235,
+        235,
+        235,
+        235
+      ]
+    }
+  ]
+}

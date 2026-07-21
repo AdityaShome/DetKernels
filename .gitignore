@@ -6,6 +6,5 @@ venv/
 .ipynb_checkpoints/
 outputs/
 *.log
-report*.json
 .env
 project.md
