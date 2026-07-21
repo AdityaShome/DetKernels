@@ -25,6 +25,11 @@ class SweepConfig:
     n_repeats: int = 100
     max_tokens: int = 256
     temperature: float = 0.0
+    # Sequence-length sweep: each value is padded/repeated onto `prompt` to
+    # reach roughly that many words, then swept at `seqlen_batch_size` (the
+    # dimension most likely to actually surface padding-related divergence).
+    sequence_lengths: List[int] = field(default_factory=list)
+    seqlen_batch_size: int = 32
 
 
 @dataclass
@@ -34,6 +39,33 @@ class BatchSizeResult:
     n_diverging: int
     divergence_indices: List[int]
     reference_tokens: Tuple
+
+
+@dataclass
+class SequenceLengthResult:
+    sequence_length: int
+    batch_size: int
+    all_identical: bool
+    n_diverging: int
+    divergence_indices: List[int]
+
+
+@dataclass
+class SweepResults:
+    tensor_parallel_size: int
+    batch_size_results: List[BatchSizeResult] = field(default_factory=list)
+    sequence_length_results: List[SequenceLengthResult] = field(default_factory=list)
+
+
+def pad_prompt_to_length(prompt: str, target_words: int) -> str:
+    """Pad `prompt` with filler text until it reaches roughly `target_words`
+    words, to probe sequence-length/padding-dependent divergence. No-op if
+    `prompt` is already at or past the target length."""
+    filler = "The quick brown fox jumps over the lazy dog. "
+    padded = prompt
+    while len(padded.split()) < target_words:
+        padded += " " + filler
+    return padded
 
 
 def summarize_batch_results(batch_size: int, runs: Sequence[Sequence]) -> BatchSizeResult:
@@ -95,11 +127,35 @@ async def sweep_batch_size(client, cfg: SweepConfig, batch_size: int) -> BatchSi
     return summarize_batch_results(batch_size, runs)
 
 
-async def run_sweep(cfg: SweepConfig) -> List[BatchSizeResult]:
+async def sweep_sequence_length(client, cfg: SweepConfig, seq_len: int) -> SequenceLengthResult:
+    padded_prompt = pad_prompt_to_length(cfg.prompt, seq_len)
+    runs = []
+    for _ in range(cfg.n_repeats):
+        tasks = [
+            _single_request(client, cfg, padded_prompt)
+            for _ in range(cfg.seqlen_batch_size)
+        ]
+        results = await asyncio.gather(*tasks)
+        runs.append(results[0])
+    summary = summarize_batch_results(cfg.seqlen_batch_size, runs)
+    return SequenceLengthResult(
+        sequence_length=seq_len,
+        batch_size=cfg.seqlen_batch_size,
+        all_identical=summary.all_identical,
+        n_diverging=summary.n_diverging,
+        divergence_indices=summary.divergence_indices,
+    )
+
+
+async def run_sweep(cfg: SweepConfig, tensor_parallel_size: int = 1) -> SweepResults:
     from openai import AsyncOpenAI  # lazy import: keep this module importable
 
     client = AsyncOpenAI(base_url=cfg.base_url, api_key="EMPTY")
-    results = []
+    results = SweepResults(tensor_parallel_size=tensor_parallel_size)
     for bs in cfg.batch_sizes:
-        results.append(await sweep_batch_size(client, cfg, bs))
+        results.batch_size_results.append(await sweep_batch_size(client, cfg, bs))
+    for seq_len in cfg.sequence_lengths:
+        results.sequence_length_results.append(
+            await sweep_sequence_length(client, cfg, seq_len)
+        )
     return results

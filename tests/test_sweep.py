@@ -1,4 +1,4 @@
-from harness.sweep import summarize_batch_results
+from harness.sweep import pad_prompt_to_length, summarize_batch_results
 
 
 def test_all_identical_runs_flagged_as_deterministic():
@@ -54,3 +54,14 @@ def test_matches_phase0_observed_pattern():
     assert result.all_identical is False
     assert result.n_diverging == 19
     assert set(result.divergence_indices) == {235}
+
+
+def test_pad_prompt_to_length_reaches_target_word_count():
+    padded = pad_prompt_to_length("short prompt", target_words=20)
+    assert len(padded.split()) >= 20
+    assert padded.startswith("short prompt")
+
+
+def test_pad_prompt_to_length_is_noop_if_already_long_enough():
+    prompt = " ".join(["word"] * 30)
+    assert pad_prompt_to_length(prompt, target_words=10) == prompt
