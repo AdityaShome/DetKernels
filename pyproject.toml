@@ -1,0 +1,23 @@
+[project]
+name = "detkernels"
+version = "0.1.0"
+description = "Deterministic / batch-invariant inference kernel library and reproducibility harness"
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+    "openai",
+]
+
+[project.optional-dependencies]
+localizer = ["torch", "transformers", "accelerate"]
+dev = ["pytest"]
+
+[project.scripts]
+detkernels-audit = "harness.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["harness"]
