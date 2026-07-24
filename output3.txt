@@ -1,0 +1,223 @@
+Starting vLLM server for Qwen/Qwen3-1.7B (tp=1)...
+Loading Qwen/Qwen3-1.7B via transformers for localization (batch_size=32)...
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100% 311/311 [00:13<00:00, 23.73it/s]
+{
+  "model": "Qwen/Qwen3-1.7B",
+  "prompt": "Explain in one paragraph why floating point addition is not associative, and why that matters for reproducibility.",
+  "max_tokens": 256,
+  "n_repeats": 30,
+  "timestamp": "2026-07-23T14:17:44",
+  "tensor_parallel_results": [
+    {
+      "tensor_parallel_size": 1,
+      "batch_size_results": [
+        {
+          "batch_size": 1,
+          "all_identical": true,
+          "n_diverging": 0,
+          "divergence_indices": []
+        },
+        {
+          "batch_size": 32,
+          "all_identical": false,
+          "n_diverging": 1,
+          "divergence_indices": [
+            235
+          ]
+        }
+      ],
+      "sequence_length_results": [
+        {
+          "sequence_length": 50,
+          "batch_size": 32,
+          "all_identical": true,
+          "n_diverging": 0,
+          "divergence_indices": []
+        },
+        {
+          "sequence_length": 500,
+          "batch_size": 32,
+          "all_identical": true,
+          "n_diverging": 0,
+          "divergence_indices": []
+        }
+      ]
+    }
+  ],
+  "localization": {
+    "batch_size": 32,
+    "first_diverging_layer": 0,
+    "layer_diffs": [
+      {
+        "layer_index": 0,
+        "layer_name": "layer_0",
+        "max_abs_diff": 0.00390625,
+        "identical": false
+      },
+      {
+        "layer_index": 1,
+        "layer_name": "layer_1",
+        "max_abs_diff": 0.015625,
+        "identical": false
+      },
+      {
+        "layer_index": 2,
+        "layer_name": "layer_2",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 3,
+        "layer_name": "layer_3",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 4,
+        "layer_name": "layer_4",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 5,
+        "layer_name": "layer_5",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 6,
+        "layer_name": "layer_6",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 7,
+        "layer_name": "layer_7",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 8,
+        "layer_name": "layer_8",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 9,
+        "layer_name": "layer_9",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 10,
+        "layer_name": "layer_10",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 11,
+        "layer_name": "layer_11",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 12,
+        "layer_name": "layer_12",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 13,
+        "layer_name": "layer_13",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 14,
+        "layer_name": "layer_14",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 15,
+        "layer_name": "layer_15",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 16,
+        "layer_name": "layer_16",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 17,
+        "layer_name": "layer_17",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 18,
+        "layer_name": "layer_18",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 19,
+        "layer_name": "layer_19",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 20,
+        "layer_name": "layer_20",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 21,
+        "layer_name": "layer_21",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 22,
+        "layer_name": "layer_22",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 23,
+        "layer_name": "layer_23",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 24,
+        "layer_name": "layer_24",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 25,
+        "layer_name": "layer_25",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 26,
+        "layer_name": "layer_26",
+        "max_abs_diff": 8.0,
+        "identical": false
+      },
+      {
+        "layer_index": 27,
+        "layer_name": "layer_27",
+        "max_abs_diff": 8.0,
+        "identical": false
+      }
+    ]
+  }
+}
