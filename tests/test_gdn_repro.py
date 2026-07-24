@@ -16,7 +16,7 @@ if not torch.cuda.is_available():
 pytest.importorskip("triton", reason="requires triton")
 pytest.importorskip("fla", reason="requires flash-linear-attention")
 
-from gdn.repro import check_row_invariance  # noqa: E402
+from gdn.repro import check_packing_position_invariance, check_row_invariance  # noqa: E402
 
 
 def test_check_row_invariance_produces_well_formed_comparisons():
@@ -30,3 +30,16 @@ def test_check_row_invariance_produces_well_formed_comparisons():
     assert c["max_abs_diff"] >= 0.0
     import math
     assert not math.isnan(c["max_abs_diff"])
+
+
+def test_check_packing_position_invariance_produces_well_formed_comparisons():
+    result = check_packing_position_invariance(
+        tracked_seq_len=16, other_seq_lens=(12, 20), h=2, hv=4, k_dim=32, v_dim=32, seed=0,
+    )
+    assert result["reference_position"] == 0
+    assert len(result["comparisons"]) == 2
+    import math
+    for c in result["comparisons"]:
+        assert isinstance(c["identical"], bool)
+        assert c["max_abs_diff"] >= 0.0
+        assert not math.isnan(c["max_abs_diff"])
