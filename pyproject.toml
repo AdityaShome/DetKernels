@@ -16,6 +16,7 @@ dev = ["pytest"]
 [project.scripts]
 detkernels-audit = "harness.cli:main"
 detkernels-kernel-check = "kernels.integration:main"
+detkernels-kernel-bench = "kernels.benchmark:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
