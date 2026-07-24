@@ -1,0 +1,78 @@
+{
+  "timestamp": "2026-07-24T17:07:18.950472+00:00",
+  "n_iters": 50,
+  "batch_sizes": [
+    1,
+    8,
+    64
+  ],
+  "rmsnorm": [
+    {
+      "batch_size": 1,
+      "reference_eager_ms": 0.10292351722717286,
+      "batch_invariant_ms": 0.041685757637023924,
+      "batch_variant_ms": 0.03895359992980957,
+      "invariant_overhead_vs_eager_pct": -59.49831606996573
+    },
+    {
+      "batch_size": 8,
+      "reference_eager_ms": 0.10172800064086913,
+      "batch_invariant_ms": 0.0399289608001709,
+      "batch_variant_ms": 0.03751872062683106,
+      "invariant_overhead_vs_eager_pct": -60.74929169095506
+    },
+    {
+      "batch_size": 64,
+      "reference_eager_ms": 0.1618560028076172,
+      "batch_invariant_ms": 0.06967487812042236,
+      "batch_variant_ms": 0.10416895866394044,
+      "invariant_overhead_vs_eager_pct": -56.952552323167005
+    }
+  ],
+  "matmul": [
+    {
+      "batch_size": 1,
+      "cublas_ms": 0.17158336639404298,
+      "batch_invariant_ms": 2.1649746704101562,
+      "batch_variant_ms": 3.083837585449219,
+      "invariant_overhead_vs_cublas_pct": 1161.7625565395829
+    },
+    {
+      "batch_size": 8,
+      "cublas_ms": 0.16512575149536132,
+      "batch_invariant_ms": 1.1745209503173828,
+      "batch_variant_ms": 2.846433410644531,
+      "invariant_overhead_vs_cublas_pct": 611.2887842635357
+    },
+    {
+      "batch_size": 64,
+      "cublas_ms": 0.13623488426208497,
+      "batch_invariant_ms": 1.306956787109375,
+      "batch_variant_ms": 1.3340071105957032,
+      "invariant_overhead_vs_cublas_pct": 859.340769574911
+    }
+  ],
+  "attention": [
+    {
+      "batch_size": 1,
+      "reference_eager_ms": 0.17924095153808595,
+      "batch_invariant_ms": 0.12381695747375489,
+      "batch_variant_ms": 0.1737868881225586,
+      "invariant_overhead_vs_eager_pct": -30.921501804543983
+    },
+    {
+      "batch_size": 8,
+      "reference_eager_ms": 0.7760646057128906,
+      "batch_invariant_ms": 0.1548703956604004,
+      "batch_variant_ms": 0.15604864120483397,
+      "invariant_overhead_vs_eager_pct": -80.04413620717351
+    },
+    {
+      "batch_size": 64,
+      "reference_eager_ms": 6.00637451171875,
+      "batch_invariant_ms": 0.9973107147216796,
+      "batch_variant_ms": 1.000980453491211,
+      "invariant_overhead_vs_eager_pct": -83.39579537080355
+    }
+  ]
+}
