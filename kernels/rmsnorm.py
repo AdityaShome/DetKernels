@@ -5,12 +5,12 @@ Per "Defeating Nondeterminism in LLM Inference" (Thinking Machines, Sept
 2025), RMSNorm nondeterminism arises when a kernel's reduction strategy for
 the sum-of-squares over the hidden dimension depends on how many rows
 (batch * seq_len) are being processed concurrently -- e.g. splitting a row's
-reduction across multiple thread blocks (combined via atomics) only when
-there's "enough" other work to justify it. Atomic-add order across
-concurrently scheduled thread blocks is a GPU-scheduler decision, not fixed
-by the kernel, so it reproduces the *same-batch-size-sometimes-diverges*
-pattern actually observed in docs/PHASE0_RESULTS.md (not just a fixed
-function of batch size).
+reduction across multiple thread blocks (combined via atomics) specifically
+when there ISN'T "enough" other row-level parallelism to keep the GPU busy
+on its own. Atomic-add order across concurrently scheduled thread blocks is
+a GPU-scheduler decision, not fixed by the kernel, so it reproduces the
+*same-batch-size-sometimes-diverges* pattern actually observed in
+docs/PHASE0_RESULTS.md (not just a fixed function of batch size).
 
 Two kernel variants are provided:
 - `rmsnorm_batch_invariant`: always one program per row, single-block
@@ -18,12 +18,14 @@ Two kernel variants are provided:
   size along the batch axis never enters the computation, so this is
   invariant by construction.
 - `rmsnorm_batch_variant`: switches to a split-reduction-via-atomics path
-  once the batch is large enough (`split_threshold`), as a synthetic stand-in
-  for the general class of occupancy/batch-size-dependent kernel dispatch
-  described above. This is NOT a reimplementation of vLLM's actual RMSNorm
-  kernel -- it's a minimal, honest reproduction of the mechanism (batch-size-
-  dependent reduction order -> nondeterministic output), used as the "before"
-  baseline to benchmark the fix against.
+  once the batch is too small to saturate the GPU via row-parallelism alone
+  (`n_rows < split_threshold`), as a synthetic stand-in for the general class
+  of occupancy/batch-size-dependent kernel dispatch described above --
+  matching the direction used in matmul.py's split-K and attention.py's
+  split-KV. This is NOT a reimplementation of vLLM's actual RMSNorm kernel --
+  it's a minimal, honest reproduction of the mechanism (batch-size-dependent
+  reduction order -> nondeterministic output), used as the "before" baseline
+  to benchmark the fix against.
 
 `torch`/`triton` are imported lazily so this module stays importable without
 a GPU present; correctness/invariance is only verifiable on real hardware
@@ -178,9 +180,12 @@ def rmsnorm_batch_invariant(x, weight, eps: float = 1e-6):
 def rmsnorm_batch_variant(x, weight, eps: float = 1e-6, split_threshold: int = 16,
                            n_splits: int = 4):
     """Deliberately batch-*variant* RMSNorm: switches to a split-reduction-
-    via-atomics path once `n_rows >= split_threshold`, as a synthetic
-    reproduction of batch-size-dependent kernel dispatch. This is the
-    "before" baseline -- see module docstring."""
+    via-atomics path once `n_rows < split_threshold` (i.e. when the batch is
+    too small to otherwise saturate the GPU via row-parallelism alone), as a
+    synthetic reproduction of occupancy-driven, batch-size-dependent kernel
+    dispatch -- matching the direction used in matmul.py's split-K and
+    attention.py's split-KV. This is the "before" baseline -- see module
+    docstring."""
     import torch
 
     triton, tl = _get_triton()
@@ -192,7 +197,7 @@ def rmsnorm_batch_variant(x, weight, eps: float = 1e-6, split_threshold: int = 1
     n_rows, n_cols = x2d.shape
     out = torch.empty_like(x2d)
 
-    if n_rows < split_threshold:
+    if n_rows >= split_threshold:
         BLOCK_SIZE = triton.next_power_of_2(n_cols)
         single_block_kernel[(n_rows,)](
             x2d, weight, out, n_cols, eps,
