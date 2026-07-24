@@ -10,6 +10,7 @@ dependencies = [
 
 [project.optional-dependencies]
 localizer = ["torch", "transformers", "accelerate"]
+kernels = ["torch", "triton"]
 dev = ["pytest"]
 
 [project.scripts]
@@ -20,4 +21,4 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["harness"]
+packages = ["harness", "kernels"]
