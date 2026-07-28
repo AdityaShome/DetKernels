@@ -201,17 +201,106 @@ def check_packing_position_invariance(tracked_seq_len: int = 48,
     return {"reference_position": reference_pos, "comparisons": comparisons}
 
 
+def _decode_loop(n_other: int, n_steps: int, h, hv, k_dim, v_dim, device, dtype,
+                  state_dtype, seed_base: int):
+    """Simulate `n_steps` of incremental decode: at each step, generate one
+    new token's (q, k, v, beta, gate) for a batch of (1 tracked + n_other
+    other) sequences, call chunk_gated_delta_rule with T=1, and carry the
+    returned state forward as `initial_state` on the next step -- explicitly
+    cast to `state_dtype` between calls, mimicking a persistent bf16 state
+    cache the way a real decode loop stores it. Per PR #45819's reviewer:
+    "keeping the GDN recurrent_state in bf16 was enough to break it on its
+    own" because rounding drifts compound step by step across a whole
+    generation -- a single one-shot call (see check_row_invariance /
+    check_packing_position_invariance above) cannot exercise this at all.
+
+    The tracked sequence (row 0) always gets the SAME per-step token content
+    regardless of `n_other`, via a seed independent of batch size -- so any
+    difference in its output trajectory across different `n_other` values is
+    attributable only to the kernel/state, never to different input content.
+    """
+    import torch
+    from fla.ops.gated_delta_rule import chunk_gated_delta_rule
+
+    batch = 1 + n_other
+    state = None
+    tracked_outputs = []
+
+    for step in range(n_steps):
+        q, k, v, beta, gate = _make_inputs(batch, 1, h, hv, k_dim, v_dim, device, dtype,
+                                            seed=seed_base + step)
+        q0, k0, v0, beta0, g0 = _make_inputs(1, 1, h, hv, k_dim, v_dim, device, dtype,
+                                              seed=999_000 + step)
+        q[0:1], k[0:1], v[0:1], beta[0:1], gate[0:1] = q0, k0, v0, beta0, g0
+
+        o, new_state = chunk_gated_delta_rule(q, k, v, gate, beta, initial_state=state,
+                                               output_final_state=True)
+        state = new_state.to(state_dtype)
+        tracked_outputs.append(o[0, 0].clone())  # (hv, v_dim) for this step
+
+    return torch.stack(tracked_outputs, dim=0)  # (n_steps, hv, v_dim)
+
+
+def check_decode_state_drift(n_steps: int = 300, n_other_seqs_options=(0, 63), h: int = 2,
+                              hv: int = 4, k_dim: int = 64, v_dim: int = 64,
+                              device: str = "cuda", dtype=None, state_dtype=None, seed: int = 0):
+    """The reviewer-identified mechanism, simulated directly: does the
+    tracked sequence's decode-time output trajectory drift apart from its
+    solo (n_other=0) baseline once enough OTHER concurrently-decoding
+    sequences are present, purely from bf16 recurrent-state rounding
+    compounding over many steps? Reports the first step (if any) at which
+    the trajectories stop matching exactly."""
+    import torch
+
+    if dtype is None:
+        dtype = torch.bfloat16
+    if state_dtype is None:
+        state_dtype = torch.bfloat16
+
+    trajectories = {
+        n_other: _decode_loop(n_other, n_steps, h, hv, k_dim, v_dim, device, dtype,
+                               state_dtype, seed_base=seed * 100_000)
+        for n_other in n_other_seqs_options
+    }
+
+    reference_n = n_other_seqs_options[0]
+    reference = trajectories[reference_n]
+    comparisons = []
+    for n_other in n_other_seqs_options[1:]:
+        traj = trajectories[n_other]
+        per_step_diff = (reference.float() - traj.float()).abs().amax(dim=(1, 2))
+        diff_list = per_step_diff.tolist()
+        first_diverging_step = next((i for i, d in enumerate(diff_list) if d > 0), None)
+        comparisons.append({
+            "n_other_sequences": n_other,
+            "reference_n_other_sequences": reference_n,
+            "identical": first_diverging_step is None,
+            "first_diverging_step": first_diverging_step,
+            "max_abs_diff": max(diff_list),
+        })
+    return {
+        "n_steps": n_steps,
+        "reference_n_other_sequences": reference_n,
+        "comparisons": comparisons,
+    }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=["row", "packing", "both"], default="both",
-                         help="'row': rectangular same-length batch (came back "
-                              "max_abs_diff=0.0 -- likely not the real bug path). "
-                              "'packing': vLLM's actual cu_seqlens ragged-packing shape.")
+    parser.add_argument("--mode", choices=["row", "packing", "decode", "all"], default="decode",
+                         help="'row': rectangular same-length batch (came back max_abs_diff=0.0 "
+                              "-- one-shot call, likely not the real bug path). 'packing': "
+                              "vLLM's cu_seqlens ragged-packing shape (also came back 0.0). "
+                              "'decode': simulated incremental decode with bf16 state carried "
+                              "across many steps -- the reviewer-identified mechanism, untested "
+                              "so far.")
     parser.add_argument("--batch-sizes", default="1,64", help="For --mode row.")
     parser.add_argument("--seq-len", type=int, default=128, help="For --mode row.")
     parser.add_argument("--tracked-seq-len", type=int, default=48, help="For --mode packing.")
     parser.add_argument("--other-seq-lens", default="37,53,29,61", help="For --mode packing.")
+    parser.add_argument("--n-steps", type=int, default=300, help="For --mode decode.")
+    parser.add_argument("--n-other-seqs", default="0,63", help="For --mode decode.")
     parser.add_argument("--repeats", type=int, default=1,
                          help="Repeat the whole check this many times with different "
                               "'other sequence' content, to see if divergence is consistent "
@@ -220,17 +309,19 @@ def main(argv=None):
     args = parser.parse_args(argv)
     batch_sizes = [int(x) for x in args.batch_sizes.split(",")]
     other_seq_lens = tuple(int(x) for x in args.other_seq_lens.split(","))
+    n_other_seqs_options = tuple(int(x) for x in args.n_other_seqs.split(","))
+    modes = ("row", "packing", "decode") if args.mode == "all" else (args.mode,)
 
-    row_results, packing_results = [], []
+    row_results, packing_results, decode_results = [], [], []
     for r in range(args.repeats):
-        if args.mode in ("row", "both"):
+        if "row" in modes:
             res = check_row_invariance(batch_sizes, seq_len=args.seq_len, seed=r)
             row_results.append(res)
             for c in res["comparisons"]:
                 print(f"[row]     repeat={r} batch_size={c['batch_size']} "
                       f"vs ref_bs={c['reference_batch_size']}: "
                       f"identical={c['identical']} max_abs_diff={c['max_abs_diff']:.6g}")
-        if args.mode in ("packing", "both"):
+        if "packing" in modes:
             res = check_packing_position_invariance(
                 tracked_seq_len=args.tracked_seq_len, other_seq_lens=other_seq_lens, seed=r,
             )
@@ -239,6 +330,17 @@ def main(argv=None):
                 print(f"[packing] repeat={r} tracked_position={c['tracked_position']} "
                       f"vs ref_pos={c['reference_position']}: "
                       f"identical={c['identical']} max_abs_diff={c['max_abs_diff']:.6g}")
+        if "decode" in modes:
+            res = check_decode_state_drift(
+                n_steps=args.n_steps, n_other_seqs_options=n_other_seqs_options, seed=r,
+            )
+            decode_results.append(res)
+            for c in res["comparisons"]:
+                print(f"[decode]  repeat={r} n_other={c['n_other_sequences']} "
+                      f"vs ref_n_other={c['reference_n_other_sequences']}: "
+                      f"identical={c['identical']} "
+                      f"first_diverging_step={c['first_diverging_step']} "
+                      f"max_abs_diff={c['max_abs_diff']:.6g}")
 
     report = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -247,9 +349,12 @@ def main(argv=None):
         "seq_len": args.seq_len,
         "tracked_seq_len": args.tracked_seq_len,
         "other_seq_lens": list(other_seq_lens),
+        "n_steps": args.n_steps,
+        "n_other_seqs_options": list(n_other_seqs_options),
         "repeats": args.repeats,
         "row_results": row_results,
         "packing_results": packing_results,
+        "decode_results": decode_results,
     }
     if args.output:
         with open(args.output, "w") as f:
