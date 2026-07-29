@@ -18,6 +18,7 @@ pytest.importorskip("fla", reason="requires flash-linear-attention")
 
 from gdn.repro import (  # noqa: E402
     check_decode_state_drift,
+    check_geometry_invariance,
     check_packing_position_invariance,
     check_row_invariance,
 )
@@ -62,3 +63,15 @@ def test_check_decode_state_drift_produces_well_formed_comparisons():
     assert not math.isnan(c["max_abs_diff"])
     if c["first_diverging_step"] is not None:
         assert 0 <= c["first_diverging_step"] < 10
+
+
+def test_check_geometry_invariance_produces_well_formed_comparisons():
+    result = check_geometry_invariance(tracked_seq_len=50, other_totals=(0, 200, 800),
+                                        filler_seq_len=47, h=2, hv=4, k_dim=32, v_dim=32, seed=0)
+    assert result["reference_other_tokens_total"] == 0
+    assert len(result["comparisons"]) == 2
+    import math
+    for c in result["comparisons"]:
+        assert isinstance(c["identical"], bool)
+        assert c["max_abs_diff"] >= 0.0
+        assert not math.isnan(c["max_abs_diff"])

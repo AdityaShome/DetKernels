@@ -18,7 +18,14 @@ bug reports are about) -- this may require an sm_80+ GPU (A100/L4), since
 Tesla T4 (Turing, sm_75) lacks native bf16 tensor-core support.
 
 Usage:
-    detkernels-gdn-repro --batch-sizes 1,64 --repeats 5 --output gdn_repro.json
+    detkernels-gdn-repro --mode geometry --repeats 5 --output gdn_repro.json
+
+Four hypotheses tested so far, in order: rectangular batch composition
+(`row`), position within a fixed-total-size cu_seqlens packed batch
+(`packing`), bf16 recurrent-state drift over many decode steps (`decode`) --
+all three came back bit-exact identical (max_abs_diff=0.0) -- and total
+packed-call size / chunk-boundary geometry (`geometry`), the current leading
+untested hypothesis.
 """
 from __future__ import annotations
 
@@ -201,6 +208,56 @@ def check_packing_position_invariance(tracked_seq_len: int = 48,
     return {"reference_position": reference_pos, "comparisons": comparisons}
 
 
+def check_geometry_invariance(tracked_seq_len: int = 50, other_totals=(0, 500, 2000),
+                               filler_seq_len: int = 47, h: int = 2, hv: int = 4,
+                               k_dim: int = 64, v_dim: int = 64, device: str = "cuda",
+                               dtype=None, seed: int = 0):
+    """The fourth hypothesis, after row/packing/decode all came back clean:
+    PR #45819's reviewer flagged that chunk_gated_delta_rule's Triton kernel
+    selects tiles/grids based on "sequence geometry" -- but check_packing_-
+    position_invariance held the packed batch's TOTAL token count constant
+    (only reordering the tracked sequence within it), so it could never have
+    exercised a total-size-dependent grid/tile selection. This holds the
+    tracked sequence fixed (content AND position, always index 0) and varies
+    only how much OTHER content is packed alongside it in the same
+    cu_seqlens call -- from none, to a few hundred, to a couple thousand
+    tokens -- to see whether the tracked row's own output changes as a
+    function of total call size. Both tracked_seq_len and filler_seq_len
+    default to values NOT divisible by the reference kernel's fixed
+    chunk_size=64, to land on ragged chunk boundaries rather than the clean
+    2-chunk case check_row_invariance happened to use (seq_len=128)."""
+    import torch
+
+    if dtype is None:
+        dtype = torch.bfloat16
+
+    tracked = _make_seq(tracked_seq_len, h, hv, k_dim, v_dim, device, dtype, seed)
+
+    outputs = {}
+    for i, total in enumerate(other_totals):
+        n_filler = total // filler_seq_len
+        others = [
+            _make_seq(filler_seq_len, h, hv, k_dim, v_dim, device, dtype,
+                      seed=200_000 + i * 1000 + j)
+            for j in range(n_filler)
+        ]
+        outputs[total] = _run_packed(tracked, others, tracked_position=0, device=device)
+
+    reference_total = other_totals[0]
+    reference = outputs[reference_total]
+    comparisons = []
+    for total in other_totals[1:]:
+        identical = torch.equal(reference, outputs[total])
+        max_abs_diff = (reference.float() - outputs[total].float()).abs().max().item()
+        comparisons.append({
+            "other_tokens_total": total,
+            "reference_other_tokens_total": reference_total,
+            "identical": identical,
+            "max_abs_diff": max_abs_diff,
+        })
+    return {"reference_other_tokens_total": reference_total, "comparisons": comparisons}
+
+
 def _decode_loop(n_other: int, n_steps: int, h, hv, k_dim, v_dim, device, dtype,
                   state_dtype, seed_base: int):
     """Simulate `n_steps` of incremental decode: at each step, generate one
@@ -288,19 +345,23 @@ def check_decode_state_drift(n_steps: int = 300, n_other_seqs_options=(0, 63), h
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=["row", "packing", "decode", "all"], default="decode",
-                         help="'row': rectangular same-length batch (came back max_abs_diff=0.0 "
-                              "-- one-shot call, likely not the real bug path). 'packing': "
-                              "vLLM's cu_seqlens ragged-packing shape (also came back 0.0). "
-                              "'decode': simulated incremental decode with bf16 state carried "
-                              "across many steps -- the reviewer-identified mechanism, untested "
-                              "so far.")
+    parser.add_argument("--mode", choices=["row", "packing", "decode", "geometry", "all"],
+                         default="geometry",
+                         help="'row': rectangular same-length batch (came back max_abs_diff=0.0). "
+                              "'packing': cu_seqlens ragged-packing position at fixed total size "
+                              "(also 0.0). 'decode': bf16 recurrent state carried across many "
+                              "decode steps (also 0.0). 'geometry': total packed-call size / "
+                              "chunk-boundary geometry -- the current leading untested "
+                              "hypothesis, since 'packing' never varied total call size.")
     parser.add_argument("--batch-sizes", default="1,64", help="For --mode row.")
     parser.add_argument("--seq-len", type=int, default=128, help="For --mode row.")
     parser.add_argument("--tracked-seq-len", type=int, default=48, help="For --mode packing.")
     parser.add_argument("--other-seq-lens", default="37,53,29,61", help="For --mode packing.")
     parser.add_argument("--n-steps", type=int, default=300, help="For --mode decode.")
     parser.add_argument("--n-other-seqs", default="0,63", help="For --mode decode.")
+    parser.add_argument("--geo-tracked-len", type=int, default=50, help="For --mode geometry.")
+    parser.add_argument("--geo-filler-len", type=int, default=47, help="For --mode geometry.")
+    parser.add_argument("--other-totals", default="0,500,2000", help="For --mode geometry.")
     parser.add_argument("--repeats", type=int, default=1,
                          help="Repeat the whole check this many times with different "
                               "'other sequence' content, to see if divergence is consistent "
@@ -310,9 +371,10 @@ def main(argv=None):
     batch_sizes = [int(x) for x in args.batch_sizes.split(",")]
     other_seq_lens = tuple(int(x) for x in args.other_seq_lens.split(","))
     n_other_seqs_options = tuple(int(x) for x in args.n_other_seqs.split(","))
-    modes = ("row", "packing", "decode") if args.mode == "all" else (args.mode,)
+    other_totals = tuple(int(x) for x in args.other_totals.split(","))
+    modes = ("row", "packing", "decode", "geometry") if args.mode == "all" else (args.mode,)
 
-    row_results, packing_results, decode_results = [], [], []
+    row_results, packing_results, decode_results, geometry_results = [], [], [], []
     for r in range(args.repeats):
         if "row" in modes:
             res = check_row_invariance(batch_sizes, seq_len=args.seq_len, seed=r)
@@ -341,6 +403,16 @@ def main(argv=None):
                       f"identical={c['identical']} "
                       f"first_diverging_step={c['first_diverging_step']} "
                       f"max_abs_diff={c['max_abs_diff']:.6g}")
+        if "geometry" in modes:
+            res = check_geometry_invariance(
+                tracked_seq_len=args.geo_tracked_len, filler_seq_len=args.geo_filler_len,
+                other_totals=other_totals, seed=r,
+            )
+            geometry_results.append(res)
+            for c in res["comparisons"]:
+                print(f"[geometry] repeat={r} other_tokens_total={c['other_tokens_total']} "
+                      f"vs ref_total={c['reference_other_tokens_total']}: "
+                      f"identical={c['identical']} max_abs_diff={c['max_abs_diff']:.6g}")
 
     report = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -349,12 +421,16 @@ def main(argv=None):
         "seq_len": args.seq_len,
         "tracked_seq_len": args.tracked_seq_len,
         "other_seq_lens": list(other_seq_lens),
+        "geo_tracked_len": args.geo_tracked_len,
+        "geo_filler_len": args.geo_filler_len,
+        "other_totals": list(other_totals),
         "n_steps": args.n_steps,
         "n_other_seqs_options": list(n_other_seqs_options),
         "repeats": args.repeats,
         "row_results": row_results,
         "packing_results": packing_results,
         "decode_results": decode_results,
+        "geometry_results": geometry_results,
     }
     if args.output:
         with open(args.output, "w") as f:
