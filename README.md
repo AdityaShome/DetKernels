@@ -8,9 +8,8 @@ batch-invariant kernels.
 Nondeterministic inference (the same prompt + greedy decoding producing
 different tokens run-to-run) comes from batch-size-dependent reduction order
 in GPU kernels (RMSNorm, matmul, attention), not floating-point
-non-associativity per se see Thinking Machines Lab's ["Defeating
-Nondeterminism in LLM Inference"](https://thinkingmachines.ai) and SGLang's
-follow-up. This repo is a from-scratch reproduction and extension of that
+non-associativity per se — see Thinking Machines Lab's "Defeating
+Nondeterminism in LLM Inference" and SGLang's follow-up. This repo is a from-scratch reproduction and extension of that
 work: **vLLM already ships a native fix** (`VLLM_BATCH_INVARIANT=1`,
 [vllm-project/vllm#27433](https://github.com/vllm-project/vllm/issues/27433))
 for standard attention this project doesn't claim to have discovered that.
@@ -40,8 +39,8 @@ results and known gaps.
 | 0 | Feasibility check, reproduce baseline nondeterminism | Done [docs/PHASE0_RESULTS.md](./docs/PHASE0_RESULTS.md), [docs/PHASE0_GAP_ANALYSIS.md](./docs/PHASE0_GAP_ANALYSIS.md) |
 | 1 | Reproducibility measurement harness | Done [docs/PHASE1_RESULTS.md](./docs/PHASE1_RESULTS.md) |
 | 2 | Batch-invariant RMSNorm / matmul / attention kernels | Done [docs/PHASE2_RESULTS.md](./docs/PHASE2_RESULTS.md) |
-| 3 | Extend determinism to GDN linear attention (vLLM #42960) | In progress |
-| 4 | Polish, publish, writeup | Not started |
+| 3 | Extend determinism to GDN linear attention (vLLM #42960) | Done (negative result) — [docs/PHASE3_RESULTS.md](./docs/PHASE3_RESULTS.md) |
+| 4 | Polish, publish, writeup | In progress |
 
 ## Requirements
 
@@ -156,9 +155,14 @@ project.md  The full phased build brief this project follows
   `torch.equal` (bitwise identity) on that row's output alone. This same
   technique is applied consistently from single kernels up through the
   integrated `TinyModel` and the `gdn/` reproduction experiments.
-- Negative results are documented, not hidden e.g. the batch-variant
+- Negative results are documented, not hidden — e.g. the batch-variant
   kernels didn't reliably reproduce observable divergence at toy scale (see
-  [docs/PHASE2_RESULTS.md](./docs/PHASE2_RESULTS.md)), and two of three GDN
-  reproduction hypotheses came back clean before a third identified likely
-  cause. See [docs/DECISIONS.md](./docs/DECISIONS.md) for the full running
-  log of what was tried and why.
+  [docs/PHASE2_RESULTS.md](./docs/PHASE2_RESULTS.md)), and all four GDN
+  reproduction hypotheses tested came back bit-exact clean (see
+  [docs/PHASE3_RESULTS.md](./docs/PHASE3_RESULTS.md)). See
+  [docs/DECISIONS.md](./docs/DECISIONS.md) for the full running log of what
+  was tried and why.
+
+## License
+
+[MIT](./LICENSE)
